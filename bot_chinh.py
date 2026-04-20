@@ -1,6 +1,5 @@
 import ccxt
 import pandas as pd
-import pandas_ta as ta
 import time
 import requests
 from datetime import datetime
@@ -46,18 +45,16 @@ def get_top_70_movers():
         return []
 
 # ==========================================
-# 3. LOGIC GHÉP NẾN & SO KÈO
+# 3. LOGIC GHÉP NẾN & SO KÈO (ĐÃ BỎ PANDAS_TA)
 # ==========================================
 def check_logic(symbol, tf):
     try:
         if tf == '10m':
-            # Lấy nến 5m để ghép thành 10m
             ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=240)
             df_5m = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
             df_5m['ts'] = pd.to_datetime(df_5m['ts'], unit='ms')
             df_5m.set_index('ts', inplace=True)
             
-            # Logic ghép nến: gom 2 cây 5p thành 1 cây 10p
             df = df_5m.resample('10min', closed='left', label='left').agg({
                 'open': 'first',
                 'high': 'max',
@@ -69,18 +66,16 @@ def check_logic(symbol, tf):
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=120)
             df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
         
-        # Tính EMA 21, 34, 55
-        df['ema21'] = ta.ema(df['close'], length=21)
-        df['ema34'] = ta.ema(df['close'], length=34)
-        df['ema55'] = ta.ema(df['close'], length=55)
+        # TÍNH EMA DÙNG PANDAS THUẦN (CHÍNH XÁC & KHÔNG LỖI BUILD)
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+        df['ema34'] = df['close'].ewm(span=34, adjust=False).mean()
+        df['ema55'] = df['close'].ewm(span=55, adjust=False).mean()
         
-        n1 = df.iloc[-2] # Nến vừa đóng gần nhất
+        n1 = df.iloc[-2]
         n2, n3, n4 = df.iloc[-3], df.iloc[-4], df.iloc[-5]
         
-        # BƯỚC 2: Xu hướng EMA21 > 34 > 55
         if not (n1['ema21'] > n1['ema34'] > n1['ema55']): return False
         
-        # BƯỚC 5: 15 phiên gần nhất KO ĐƯỢC CHẠM EMA34
         last_15 = df.iloc[-16:-1] 
         if not all(last_15['low'] > last_15['ema34']): return False
 
@@ -102,7 +97,6 @@ def check_logic(symbol, tf):
             green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
             if green_count < 2: return False
             
-        # TÍNH TOÁN THÔNG SỐ CẢNH BÁO
         current_price = n1['close']
         c_val = (n1['ema21'] - n1['ema34']) / n1['ema34']
         c_percent = c_val * 100
@@ -115,7 +109,7 @@ def check_logic(symbol, tf):
         return False
 
 # ==========================================
-# 4. VÒNG LẶP QUÉT ĐA KHUNG (RENDER OPTIMIZED)
+# 4. VÒNG LẶP QUÉT ĐA KHUNG
 # ==========================================
 def main():
     print("------------------------------------------")
@@ -128,7 +122,6 @@ def main():
         now = datetime.now()
         minute = now.minute
         
-        # Chỉ kích hoạt nếu sang phút mới và là bội số của 5
         if minute != last_run_minute and minute % 5 == 0:
             tfs_to_check = []
             if minute % 10 == 0: tfs_to_check.append('10m')
@@ -147,12 +140,12 @@ def main():
                             if alert_msg:
                                 print(f"\n✅ {alert_msg}")
                                 send_tele(alert_msg)
-                            time.sleep(0.05) # Tránh spam API
+                            time.sleep(0.05)
             
             last_run_minute = minute
             print(f"\nLượt quét phút {minute} hoàn tất. Đang chờ mốc tiếp theo...")
         
-        time.sleep(30) # Nghỉ 30s rồi check lại phút để tiết kiệm CPU
+        time.sleep(30)
 
 if __name__ == "__main__":
     main()
