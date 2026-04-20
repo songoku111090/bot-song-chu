@@ -1,4 +1,4 @@
 ccxt
 pandas==2.2.3
 requests
-https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
+git+https://github.com/twopirllc/pandas-ta.git@main
