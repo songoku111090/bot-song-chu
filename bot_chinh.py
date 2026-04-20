@@ -2,7 +2,24 @@ import ccxt
 import pandas as pd
 import time
 import requests
+import os # Thêm dòng này
 from datetime import datetime
+from threading import Thread # Thêm dòng này
+
+# --- CODE LỪA RENDER ĐỂ BÁO LIVE ---
+def health_check():
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), Handler)
+    server.serve_forever()
+
+Thread(target=health_check, daemon=True).start()
+# -----------------------------------
 
 # ==========================================
 # 1. CẤU HÌNH THÔNG TIN
@@ -45,7 +62,7 @@ def get_top_70_movers():
         return []
 
 # ==========================================
-# 3. LOGIC GHÉP NẾN & SO KÈO (ĐÃ BỎ PANDAS_TA)
+# 3. LOGIC GHÉP NẾN & SO KÈO
 # ==========================================
 def check_logic(symbol, tf):
     try:
@@ -56,17 +73,12 @@ def check_logic(symbol, tf):
             df_5m.set_index('ts', inplace=True)
             
             df = df_5m.resample('10min', closed='left', label='left').agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'vol': 'sum'
+                'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'vol': 'sum'
             }).dropna()
         else:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=120)
             df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
         
-        # TÍNH EMA DÙNG PANDAS THUẦN (CHÍNH XÁC & KHÔNG LỖI BUILD)
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['ema34'] = df['close'].ewm(span=34, adjust=False).mean()
         df['ema55'] = df['close'].ewm(span=55, adjust=False).mean()
