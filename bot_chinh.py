@@ -2,24 +2,9 @@ import ccxt
 import pandas as pd
 import time
 import requests
-import os # Thêm dòng này
+import os
 from datetime import datetime
-from threading import Thread # Thêm dòng này
-
-# --- CODE LỪA RENDER ĐỂ BÁO LIVE ---
-def health_check():
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"Bot is running!")
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), Handler)
-    server.serve_forever()
-
-Thread(target=health_check, daemon=True).start()
-# -----------------------------------
+from threading import Thread
 
 # ==========================================
 # 1. CẤU HÌNH THÔNG TIN
@@ -37,14 +22,14 @@ def send_tele(mes):
     try:
         requests.get(url, timeout=10)
     except:
-        print("\n[!] Lỗi gửi Telegram")
+        print("\n[!] Lỗi gửi Telegram", flush=True)
 
 # ==========================================
 # 2. TỐI ƯU SIÊU NHANH: LỌC TOP 70 (24H % > 0)
 # ==========================================
 def get_top_70_movers():
     now_str = datetime.now().strftime('%H:%M:%S')
-    print(f"\n[{now_str}] --- Đang quét nhanh Top 70 con tăng mạnh trong 24h ---")
+    print(f"\n[{now_str}] --- Đang quét nhanh Top 70 tăng mạnh trong 24h ---", flush=True)
     try:
         tickers = exchange.fetch_tickers()
         movers = []
@@ -55,14 +40,14 @@ def get_top_70_movers():
         
         top_70 = sorted(movers, key=lambda x: x['change'], reverse=True)[:70]
         final_list = [item['symbol'] for item in top_70]
-        print(f" Tìm thấy {len(final_list)} con thỏa mãn điều kiện tăng 24h > 0.")
+        print(f" Tìm thấy {len(final_list)} con thỏa mãn điều kiện tăng 24h > 0.", flush=True)
         return final_list
     except Exception as e:
-        print(f"Lỗi khi lấy Top 70: {e}")
+        print(f"Lỗi khi lấy Top 70: {e}", flush=True)
         return []
 
 # ==========================================
-# 3. LOGIC GHÉP NẾN & SO KÈO
+# 3. LOGIC GHÉP NẾN & SO KÈO (PANDAS THUẦN)
 # ==========================================
 def check_logic(symbol, tf):
     try:
@@ -121,12 +106,12 @@ def check_logic(symbol, tf):
         return False
 
 # ==========================================
-# 4. VÒNG LẶP QUÉT ĐA KHUNG
+# 4. VÒNG LẶP CHÍNH
 # ==========================================
-def main():
-    print("------------------------------------------")
-    print("🔥 BOT SÓNG CHỦ ONLINE - RENDER VERSION 🔥")
-    print("------------------------------------------")
+def main_loop():
+    print("------------------------------------------", flush=True)
+    print("🔥 BOT SÓNG CHỦ ONLINE - RENDER VERSION 🔥", flush=True)
+    print("------------------------------------------", flush=True)
     
     last_run_minute = -1
     
@@ -144,20 +129,37 @@ def main():
             if tfs_to_check:
                 symbols = get_top_70_movers()
                 if symbols:
-                    print(f"[{now.strftime('%H:%M:%S')}] Kiểm tra {len(symbols)} con cho khung: {tfs_to_check}")
+                    print(f"[{now.strftime('%H:%M:%S')}] Kiểm tra {len(symbols)} con cho khung: {tfs_to_check}", flush=True)
                     for i, s in enumerate(symbols):
-                        print(f"[{i+1}/{len(symbols)}] Soi: {s:<12}", end='\r')
+                        print(f"[{i+1}/{len(symbols)}] Soi: {s:<12}", end='\r', flush=True)
                         for tf in tfs_to_check:
                             alert_msg = check_logic(s, tf)
                             if alert_msg:
-                                print(f"\n✅ {alert_msg}")
+                                print(f"\n✅ {alert_msg}", flush=True)
                                 send_tele(alert_msg)
                             time.sleep(0.05)
             
             last_run_minute = minute
-            print(f"\nLượt quét phút {minute} hoàn tất. Đang chờ mốc tiếp theo...")
+            print(f"\nLượt quét phút {minute} hoàn tất. Đang chờ mốc tiếp theo...", flush=True)
         
-        time.sleep(30)
+        time.sleep(20)
+
+# --- PHẦN LỪA RENDER (FIX LỖI 501) ---
+def health_check():
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+        def do_HEAD(self):
+            self.send_response(200); self.end_headers()
+        def log_message(self, format, *args): return # Tắt log rác của server lừa
+
+    port = int(os.environ.get("PORT", 10000))
+    print(f"--- Đang mở Port lừa Render: {port} ---", flush=True)
+    HTTPServer(('0.0.0.0', port), H).serve_forever()
 
 if __name__ == "__main__":
-    main()
+    # Chạy Health Check ở luồng phụ
+    Thread(target=health_check, daemon=True).start()
+    # Chạy Bot ở luồng chính
+    main_loop()
