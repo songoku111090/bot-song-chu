@@ -52,28 +52,39 @@ def get_top_70_movers():
 def check_logic(symbol, tf):
     try:
         if tf == '10m':
-            ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=240)
-            df_5m = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-            df_5m['ts'] = pd.to_datetime(df_5m['ts'], unit='ms')
-            df_5m.set_index('ts', inplace=True)
+            # Lấy 601 nến 5p để ghép thành 300 nến 10p hoàn chỉnh (bỏ nến đang chạy)
+            ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=601)
+            df_raw = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+            df_raw['ts'] = pd.to_datetime(df_raw['ts'], unit='ms')
+            df_raw.set_index('ts', inplace=True)
             
-            df = df_5m.resample('10min', closed='left', label='left').agg({
+            # Ghép nến 10m
+            df = df_raw.resample('10min', closed='left', label='left').agg({
                 'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'vol': 'sum'
             }).dropna()
+            # Bỏ nến đang chạy của khung 10m
+            df = df.iloc[:-1]
         else:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=120)
+            # Lấy 301 nến để có 300 nến hoàn chỉnh sau khi bỏ nến đang chạy
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=301)
             df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+            # Bỏ nến đang chạy
+            df = df.iloc[:-1]
         
+        # Tính toán EMA trên tập dữ liệu nến đã đóng
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['ema34'] = df['close'].ewm(span=34, adjust=False).mean()
         df['ema55'] = df['close'].ewm(span=55, adjust=False).mean()
         
-        n1 = df.iloc[-2]
-        n2, n3, n4 = df.iloc[-3], df.iloc[-4], df.iloc[-5]
+        # Lấy các nến cuối cùng để check logic (n1 là nến vừa đóng xong)
+        n1 = df.iloc[-1]
+        n2, n3, n4 = df.iloc[-2], df.iloc[-3], df.iloc[-4]
         
+        # 1. Điều kiện xu hướng EMA
         if not (n1['ema21'] > n1['ema34'] > n1['ema55']): return False
         
-        last_15 = df.iloc[-16:-1] 
+        # 2. Điều kiện 15 nến trước đó nằm trên EMA34
+        last_15 = df.iloc[-15:] 
         if not all(last_15['low'] > last_15['ema34']): return False
 
         def is_good_body(r):
@@ -83,6 +94,7 @@ def check_logic(symbol, tf):
 
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
+        # Check các trường hợp chạm EMA21
         th1 = all([touch21(x) and is_good_body(x) for x in [n2, n3, n4]])
         th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
         th2_bodies = is_good_body(n1) and sum([is_good_body(x) for x in [n2, n3, n4]]) >= 2
@@ -90,6 +102,7 @@ def check_logic(symbol, tf):
         
         if not (th1 or th2): return False
 
+        # Điều kiện nến hồi
         if n1['close'] < n1['open']:
             green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
             if green_count < 2: return False
@@ -102,7 +115,8 @@ def check_logic(symbol, tf):
         coin_name = symbol.split('/')[0]
         
         return f"{coin_name} chạm {tf_display} - Giá: {current_price} - C {c_percent:.2f}% - {display_val:.0f}$"
-    except:
+    except Exception as e:
+        # print(f"Lỗi logic {symbol}: {e}") # Debug nếu cần
         return False
 
 # ==========================================
@@ -152,11 +166,14 @@ def health_check():
             self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
         def do_HEAD(self):
             self.send_response(200); self.end_headers()
-        def log_message(self, format, *args): return # Tắt log rác của server lừa
+        def log_message(self, format, *args): return 
 
     port = int(os.environ.get("PORT", 10000))
     print(f"--- Đang mở Port lừa Render: {port} ---", flush=True)
-    HTTPServer(('0.0.0.0', port), H).serve_forever()
+    try:
+        HTTPServer(('0.0.0.0', port), H).serve_forever()
+    except:
+        pass
 
 if __name__ == "__main__":
     # Chạy Health Check ở luồng phụ
