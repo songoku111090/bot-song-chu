@@ -47,6 +47,40 @@ def get_top_70_movers():
         return []
 
 # ==========================================
+# 2b. LỌC TOP 5 TĂNG MẠNH NHẤT TRONG 4H (CHO KHUNG 5M)
+# ==========================================
+def get_top_5_in_4h():
+    now_str = datetime.now().strftime('%H:%M:%S')
+    print(f"\n[{now_str}] --- Đang lọc Top 5 tăng mạnh nhất trong 4h gần nhất ---", flush=True)
+    try:
+        tickers = exchange.fetch_tickers()
+        all_symbols = [s for s in tickers.keys() if s.endswith('/USDT:USDT')]
+        
+        change_list = []
+        for s in all_symbols:
+            try:
+                # Lấy 5 nến 1h để có 4 nến đã đóng gần nhất
+                ohlcv = exchange.fetch_ohlcv(s, timeframe='1h', limit=5)
+                if len(ohlcv) < 5: continue
+                
+                # Lấy giá đóng cửa của nến cách đây 4 tiếng và nến vừa đóng xong
+                price_4h_ago = ohlcv[0][1] # Open của nến đầu tiên trong chuỗi 5 nến
+                last_closed_price = ohlcv[-2][4] # Close của nến vừa đóng xong (nến -1 là đang chạy)
+                
+                change = (last_closed_price - price_4h_ago) / price_4h_ago
+                change_list.append({'symbol': s, 'change': change})
+            except:
+                continue
+                
+        top_5 = sorted(change_list, key=lambda x: x['change'], reverse=True)[:5]
+        final_list = [item['symbol'] for item in top_5]
+        print(f" Tìm thấy Top 5: {final_list}", flush=True)
+        return final_list
+    except Exception as e:
+        print(f"Lỗi khi lọc Top 5 4h: {e}", flush=True)
+        return []
+
+# ==========================================
 # 3. LOGIC GHÉP NẾN & SO KÈO (PANDAS THUẦN)
 # ==========================================
 def check_logic(symbol, tf):
@@ -95,7 +129,6 @@ def check_logic(symbol, tf):
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
         # Check các trường hợp chạm EMA21
-        # Sửa th1: Kiểm tra bộ 3 nến n1, n2, n3 (thay vì n2, n3, n4)
         th1 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3]])
         
         th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
@@ -118,7 +151,6 @@ def check_logic(symbol, tf):
         
         return f"{coin_name} chạm {tf_display} - Giá: {current_price} - C {c_percent:.2f}% - {display_val:.0f}$"
     except Exception as e:
-        # print(f"Lỗi logic {symbol}: {e}") # Debug nếu cần
         return False
 
 # ==========================================
@@ -136,23 +168,34 @@ def main_loop():
         minute = now.minute
         
         if minute != last_run_minute and minute % 5 == 0:
-            tfs_to_check = []
+            tfs_to_check = ['5m'] # Mặc định phút nào chia hết cho 5 cũng check 5m
             if minute % 10 == 0: tfs_to_check.append('10m')
             if minute % 15 == 0: tfs_to_check.append('15m')
             if minute % 30 == 0: tfs_to_check.append('30m')
             if minute == 0: tfs_to_check.append('1h')
 
             if tfs_to_check:
-                symbols = get_top_70_movers()
-                if symbols:
-                    print(f"[{now.strftime('%H:%M:%S')}] Kiểm tra {len(symbols)} con cho khung: {tfs_to_check}", flush=True)
-                    for i, s in enumerate(symbols):
-                        print(f"[{i+1}/{len(symbols)}] Soi: {s:<12}", end='\r', flush=True)
-                        for tf in tfs_to_check:
-                            alert_msg = check_logic(s, tf)
-                            if alert_msg:
-                                print(f"\n✅ {alert_msg}", flush=True)
-                                send_tele(alert_msg)
+                # Phân tách danh sách symbol cho các khung
+                # 5m dùng Top 5 tăng mạnh trong 4h. Các khung khác dùng Top 70 24h.
+                top_70 = get_top_70_movers()
+                top_5_4h = get_top_5_in_4h()
+                
+                print(f"[{now.strftime('%H:%M:%S')}] Đang quét các khung: {tfs_to_check}", flush=True)
+                
+                # Gom các khung để quét
+                for tf in tfs_to_check:
+                    # Chọn danh sách symbol tương ứng với khung
+                    current_symbols = top_5_4h if tf == '5m' else top_70
+                    
+                    if not current_symbols: continue
+                    
+                    print(f"--- Đang check khung {tf} cho {len(current_symbols)} con ---", flush=True)
+                    for i, s in enumerate(current_symbols):
+                        print(f"[{i+1}/{len(current_symbols)}] Soi {tf}: {s:<12}", end='\r', flush=True)
+                        alert_msg = check_logic(s, tf)
+                        if alert_msg:
+                            print(f"\n✅ {alert_msg}", flush=True)
+                            send_tele(alert_msg)
                             time.sleep(0.05)
             
             last_run_minute = minute
