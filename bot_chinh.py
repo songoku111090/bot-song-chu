@@ -87,10 +87,10 @@ def check_logic(symbol, tf):
         last_15 = df.iloc[-15:] 
         if not all(last_15['low'] > last_15['ema34']): return False
 
+        # --- ĐIỀU KIỆN RÂU NẾN MỚI ---
         def is_good_body(r):
-            upper_wick = r['high'] - max(r['open'], r['close'])
-            lower_wick = min(r['open'], r['close']) - r['low']
-            return upper_wick > lower_wick
+            # high - ema 21 > ema 21 - low
+            return (r['high'] - r['ema21']) > (r['ema21'] - r['low'])
 
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
