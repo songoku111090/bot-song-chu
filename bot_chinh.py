@@ -95,7 +95,9 @@ def check_logic(symbol, tf):
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
         # Check các trường hợp chạm EMA21
-        th1 = all([touch21(x) and is_good_body(x) for x in [n2, n3, n4]])
+        # Sửa th1: Kiểm tra bộ 3 nến n1, n2, n3 (thay vì n2, n3, n4)
+        th1 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3]])
+        
         th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
         th2_bodies = is_good_body(n1) and sum([is_good_body(x) for x in [n2, n3, n4]]) >= 2
         th2 = th2_hits and th2_bodies
