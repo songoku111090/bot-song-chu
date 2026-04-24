@@ -53,7 +53,7 @@ def get_top_70_movers():
 def check_logic(symbol, tf):
     try:
         # Thêm nghỉ cực ngắn để tránh spam API khi chạy đa luồng
-        time.sleep(0.1)
+        time.sleep(0.1) 
         if tf == '10m':
             ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=601)
             df_raw = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
@@ -126,13 +126,14 @@ def main_loop():
         # Chỉ chạy ở phút chia hết cho 10 (vì đã bỏ khung 5m) và đúng giây thứ 5
         if minute % 10 == 0 and minute != last_run_minute and second >= 5:
             tfs_to_check = ['10m']
-            # Kiểm tra các khung lớn hơn
             if minute % 15 == 0: tfs_to_check.append('15m')
             if minute % 30 == 0: tfs_to_check.append('30m')
             if minute == 0: tfs_to_check.append('1h')
 
             if tfs_to_check:
                 top_70 = get_top_70_movers()
+                # Nghỉ một chút sau khi lấy Top 70 để Binance không khóa
+                time.sleep(0.5) 
                 
                 print(f"[{now.strftime('%H:%M:%S')}] Đang quét các khung: {tfs_to_check}", flush=True)
                 
@@ -157,13 +158,17 @@ def main_loop():
                                 if alert_msg:
                                     print(f"\n✅ {alert_msg}", flush=True)
                                     send_tele(alert_msg)
+                                    # Nghỉ 0.1s sau khi gửi Tele thành công
+                                    time.sleep(0.1) 
                             except Exception as e:
                                 pass 
+                    
+                    # Nghỉ 0.5s giữa các khung giờ để giãn cách lệnh gọi
+                    time.sleep(0.5)
             
             last_run_minute = minute
             print(f"\nLượt quét phút {minute} hoàn tất tại giây {datetime.now().second}. Đang chờ mốc tiếp theo...", flush=True)
         
-        # Nghỉ 1 giây để lặp lại kiểm tra đúng giây thứ 5
         time.sleep(1)
 
 # --- PHẦN LỪA RENDER (FIX LỖI 501) ---
