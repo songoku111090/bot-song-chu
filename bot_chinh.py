@@ -159,6 +159,7 @@ def check_logic(symbol, tf):
 def main_loop():
     print("------------------------------------------", flush=True)
     print("🔥 BOT SÓNG CHỦ ONLINE - RENDER VERSION 🔥", flush=True)
+    print("🔥 ĐÃ CÀI ĐẶT CHUẨN GIÂY THỨ 05 🔥", flush=True)
     print("------------------------------------------", flush=True)
     
     last_run_minute = -1
@@ -166,27 +167,24 @@ def main_loop():
     while True:
         now = datetime.now()
         minute = now.minute
+        second = now.second
         
-        if minute != last_run_minute and minute % 5 == 0:
-            tfs_to_check = ['5m'] # Mặc định phút nào chia hết cho 5 cũng check 5m
+        # CHẠY TẠI GIÂY THỨ 5 CỦA PHÚT CHIA HẾT CHO 5
+        if minute % 5 == 0 and minute != last_run_minute and second >= 5:
+            tfs_to_check = ['5m'] 
             if minute % 10 == 0: tfs_to_check.append('10m')
             if minute % 15 == 0: tfs_to_check.append('15m')
             if minute % 30 == 0: tfs_to_check.append('30m')
             if minute == 0: tfs_to_check.append('1h')
 
             if tfs_to_check:
-                # Phân tách danh sách symbol cho các khung
-                # 5m dùng Top 5 tăng mạnh trong 4h. Các khung khác dùng Top 70 24h.
                 top_70 = get_top_70_movers()
                 top_5_4h = get_top_5_in_4h()
                 
                 print(f"[{now.strftime('%H:%M:%S')}] Đang quét các khung: {tfs_to_check}", flush=True)
                 
-                # Gom các khung để quét
                 for tf in tfs_to_check:
-                    # Chọn danh sách symbol tương ứng với khung
                     current_symbols = top_5_4h if tf == '5m' else top_70
-                    
                     if not current_symbols: continue
                     
                     print(f"--- Đang check khung {tf} cho {len(current_symbols)} con ---", flush=True)
@@ -199,9 +197,10 @@ def main_loop():
                             time.sleep(0.05)
             
             last_run_minute = minute
-            print(f"\nLượt quét phút {minute} hoàn tất. Đang chờ mốc tiếp theo...", flush=True)
+            print(f"\nLượt quét phút {minute} hoàn tất tại giây {datetime.now().second}. Đang chờ mốc tiếp theo...", flush=True)
         
-        time.sleep(20)
+        # Nghỉ 1 giây để quét liên tục canh đúng giây thứ 5
+        time.sleep(1)
 
 # --- PHẦN LỪA RENDER (FIX LỖI 501) ---
 def health_check():
@@ -221,7 +220,5 @@ def health_check():
         pass
 
 if __name__ == "__main__":
-    # Chạy Health Check ở luồng phụ
     Thread(target=health_check, daemon=True).start()
-    # Chạy Bot ở luồng chính
     main_loop()
