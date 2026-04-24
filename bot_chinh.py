@@ -17,6 +17,10 @@ exchange = ccxt.binance({
     'options': {'defaultType': 'future'}
 })
 
+# Biến toàn cục để lưu danh sách Top 70 dùng chung trong 30 phút
+cached_top_70 = []
+last_update_top_70 = -1 
+
 def send_tele(mes):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={mes}"
     try:
@@ -29,7 +33,7 @@ def send_tele(mes):
 # ==========================================
 def get_top_70_movers():
     now_str = datetime.now().strftime('%H:%M:%S')
-    print(f"\n[{now_str}] --- Đang quét nhanh Top 70 tăng mạnh trong 24h ---", flush=True)
+    print(f"\n[{now_str}] --- Đang cập nhật mới danh sách Top 70 (30p/lần) ---", flush=True)
     try:
         tickers = exchange.fetch_tickers()
         movers = []
@@ -139,8 +143,10 @@ def check_logic(symbol, tf):
 # 4. VÒNG LẶP CHÍNH
 # ==========================================
 def main_loop():
+    global cached_top_70, last_update_top_70
+    
     print("------------------------------------------", flush=True)
-    print("🔥 BOT SÓNG CHỦ ONLINE - FIXED SEC 5 🔥", flush=True)
+    print("🔥 BOT SÓNG CHỦ ONLINE - CACHED 30P 🔥", flush=True)
     print("------------------------------------------", flush=True)
     
     last_run_key = "" # Dùng key để định danh mốc thời gian đã chạy
@@ -158,21 +164,27 @@ def main_loop():
             if current_run_key != last_run_key:
                 tfs_to_check = []
                 
-                # Check các mốc phút (Đã bỏ khung 5p, chỉ check các khung lớn hơn)
+                # Check các mốc phút
                 if minute % 10 == 0: tfs_to_check.append('10m')
                 if minute % 15 == 0: tfs_to_check.append('15m')
                 if minute % 30 == 0: tfs_to_check.append('30m')
                 if minute == 0: tfs_to_check.append('1h')
 
                 if tfs_to_check:
+                    # Logic cập nhật Top 70 mỗi 30 phút (phút 00 và 30)
+                    if not cached_top_70 or minute in [0, 30]:
+                        # Chỉ lấy lại nếu chưa lấy lần nào hoặc đúng phút 0/30 và chưa lấy trong phút này
+                        if last_update_top_70 != minute:
+                            cached_top_70 = get_top_70_movers()
+                            last_update_top_70 = minute
+
                     print(f"\n[{now.strftime('%H:%M:%S')}] Khởi động quét khung: {tfs_to_check}", flush=True)
-                    top_70 = get_top_70_movers()
                     
-                    if top_70:
+                    if cached_top_70:
                         for tf in tfs_to_check:
-                            print(f"--- Đang check khung {tf} cho {len(top_70)} con ---", flush=True)
-                            for i, s in enumerate(top_70):
-                                print(f"[{i+1}/{len(top_70)}] Soi {tf}: {s:<12}", end='\r', flush=True)
+                            print(f"--- Đang check khung {tf} cho {len(cached_top_70)} con ---", flush=True)
+                            for i, s in enumerate(cached_top_70):
+                                print(f"[{i+1}/{len(cached_top_70)}] Soi {tf}: {s:<12}", end='\r', flush=True)
                                 alert_msg = check_logic(s, tf)
                                 if alert_msg:
                                     print(f"\n✅ {alert_msg}", flush=True)
