@@ -50,27 +50,43 @@ def get_top_70_movers():
 # 3. LOGIC GHÉP NẾN & SO KÈO (PANDAS THUẦN)
 # ==========================================
 def check_logic(symbol, tf):
-    try:
-        if tf == '10m':
-            # Lấy 601 nến 5p để ghép thành 300 nến 10p hoàn chỉnh (bỏ nến đang chạy)
-            ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=601)
-            df_raw = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-            df_raw['ts'] = pd.to_datetime(df_raw['ts'], unit='ms')
-            df_raw.set_index('ts', inplace=True)
+    df = None
+    # --- CƠ CHẾ THỬ LẠI KHI LẤY OHLCV (TỐI ĐA 2 LẦN THÊM) ---
+    for attempt in range(3): # 0 là lần đầu, 1-2 là retry
+        try:
+            if tf == '10m':
+                # Lấy 601 nến 5p để ghép thành 300 nến 10p hoàn chỉnh (bỏ nến đang chạy)
+                ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=601)
+                df_raw = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+                df_raw['ts'] = pd.to_datetime(df_raw['ts'], unit='ms')
+                df_raw.set_index('ts', inplace=True)
+                
+                # Ghép nến 10m
+                df = df_raw.resample('10min', closed='left', label='left').agg({
+                    'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'vol': 'sum'
+                }).dropna()
+                # Bỏ nến đang chạy của khung 10m
+                df = df.iloc[:-1]
+            else:
+                # Lấy 301 nến để có 300 nến hoàn chỉnh sau khi bỏ nến đang chạy
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=301)
+                df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+                # Bỏ nến đang chạy
+                df = df.iloc[:-1]
             
-            # Ghép nến 10m
-            df = df_raw.resample('10min', closed='left', label='left').agg({
-                'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'vol': 'sum'
-            }).dropna()
-            # Bỏ nến đang chạy của khung 10m
-            df = df.iloc[:-1]
-        else:
-            # Lấy 301 nến để có 300 nến hoàn chỉnh sau khi bỏ nến đang chạy
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=301)
-            df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-            # Bỏ nến đang chạy
-            df = df.iloc[:-1]
-        
+            if not df.empty:
+                break # Lấy thành công thì thoát vòng lặp retry
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(0.5) # Nghỉ ngắn trước khi thử lại
+                continue
+            else:
+                print(f"\n[LOG] Lỗi lấy OHLCV {symbol} ({tf}) sau 3 lần thử: {e}", flush=True)
+                return False
+
+    if df is None or df.empty: return False
+
+    try:
         # Tính toán EMA trên tập dữ liệu nến đã đóng
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['ema34'] = df['close'].ewm(span=34, adjust=False).mean()
