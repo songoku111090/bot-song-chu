@@ -98,7 +98,7 @@ def check_logic(symbol, tf):
         
         # Lấy các nến cuối cùng để check logic (n1 là nến vừa đóng xong)
         n1 = df.iloc[-1]
-        n2, n3, n4 = df.iloc[-2], df.iloc[-3], df.iloc[-4]
+        n2, n3, n4, n5 = df.iloc[-2], df.iloc[-3], df.iloc[-4], df.iloc[-5]
         
         # 1. Điều kiện xu hướng EMA
         if not (n1['ema21'] > n1['ema34'] > n1['ema55']): return False
@@ -115,15 +115,15 @@ def check_logic(symbol, tf):
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
         # Check các trường hợp chạm EMA21
+        # TH1: 3 nến gần nhất chạm 21 và thỏa is_good_body
         th1 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3]])
         
-        th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
-        th2_bodies = is_good_body(n1) and sum([is_good_body(x) for x in [n2, n3, n4]]) >= 2
-        th2 = th2_hits and th2_bodies
+        # TH2: 5 nến gần nhất đều chạm EMA21 (Bỏ qua is_good_body và màu nến)
+        th2 = all([touch21(x) for x in [n1, n2, n3, n4, n5]])
         
         if not (th1 or th2): return False
 
-        # Điều kiện nến hồi
+        # Điều kiện nến hồi (Chỉ áp dụng khi n1 là nến đỏ)
         if n1['close'] < n1['open']:
             green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
             if green_count < 2: return False
