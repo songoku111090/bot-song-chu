@@ -107,26 +107,27 @@ def check_logic(symbol, tf):
         last_15 = df.iloc[-15:] 
         if not all(last_15['low'] > last_15['ema34']): return False
 
-        # --- ĐIỀU KIỆN RÂU NẾN MỚI ---
+        # --- ĐIỀU KIỆN RÂU NẾN ---
         def is_good_body(r):
             # high - ema 21 > ema 21 - low
             return (r['high'] - r['ema21']) > (r['ema21'] - r['low'])
 
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
-        # Check các trường hợp chạm EMA21
         # TH1: 3 nến gần nhất chạm 21 và thỏa is_good_body
         th1 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3]])
         
-        # TH2: 5 nến gần nhất đều chạm EMA21 (Bỏ qua is_good_body và màu nến)
+        # TH2: 5 nến gần nhất đều chạm EMA21
         th2 = all([touch21(x) for x in [n1, n2, n3, n4, n5]])
         
         if not (th1 or th2): return False
 
-        # Điều kiện nến hồi (Chỉ áp dụng khi n1 là nến đỏ)
-        if n1['close'] < n1['open']:
-            green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
-            if green_count < 2: return False
+        # --- ĐIỀU KIỆN MÀU NẾN (CHỈ CHECK NẾU KHÔNG PHẢI TH2) ---
+        if not th2:
+            # Nếu chỉ là TH1 đơn thuần (không phải TH2), thì mới check điều kiện nến đỏ/xanh
+            if n1['close'] < n1['open']:
+                green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
+                if green_count < 2: return False
             
         current_price = n1['close']
         c_val = (n1['ema21'] - n1['ema34']) / n1['ema34']
