@@ -120,13 +120,17 @@ def check_logic(symbol, tf):
         th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
         th2_bodies = is_good_body(n1) and sum([is_good_body(x) for x in [n2, n3, n4]]) >= 2
         th2 = th2_hits and th2_bodies
-        
-        if not (th1 or th2): return False
 
-        # Điều kiện nến hồi
-        if n1['close'] < n1['open']:
-            green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
-            if green_count < 2: return False
+        # TRƯỜNG HỢP 3: 4 nến đóng gần nhất đều chạm EMA21 và đều có good_body
+        th3 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3, n4]])
+        
+        if not (th1 or th2 or th3): return False
+
+        # Nếu không phải th3 thì mới check điều kiện màu nến hồi
+        if not th3:
+            if n1['close'] < n1['open']:
+                green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
+                if green_count < 2: return False
             
         current_price = n1['close']
         c_val = (n1['ema21'] - n1['ema34']) / n1['ema34']
