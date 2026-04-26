@@ -98,7 +98,7 @@ def check_logic(symbol, tf):
         
         # Lấy các nến cuối cùng để check logic (n1 là nến vừa đóng xong)
         n1 = df.iloc[-1]
-        n2, n3, n4, n5 = df.iloc[-2], df.iloc[-3], df.iloc[-4], df.iloc[-5]
+        n2, n3, n4 = df.iloc[-2], df.iloc[-3], df.iloc[-4]
         
         # 1. Điều kiện xu hướng EMA
         if not (n1['ema21'] > n1['ema34'] > n1['ema55']): return False
@@ -107,27 +107,26 @@ def check_logic(symbol, tf):
         last_15 = df.iloc[-15:] 
         if not all(last_15['low'] > last_15['ema34']): return False
 
-        # --- ĐIỀU KIỆN RÂU NẾN ---
+        # --- ĐIỀU KIỆN RÂU NẾN MỚI ---
         def is_good_body(r):
             # high - ema 21 > ema 21 - low
             return (r['high'] - r['ema21']) > (r['ema21'] - r['low'])
 
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
-        # TH1: 3 nến gần nhất chạm 21 và thỏa is_good_body
+        # Check các trường hợp chạm EMA21
         th1 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3]])
         
-        # TH2: 5 nến gần nhất đều chạm EMA21
-        th2 = all([touch21(x) for x in [n1, n2, n3, n4, n5]])
+        th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
+        th2_bodies = is_good_body(n1) and sum([is_good_body(x) for x in [n2, n3, n4]]) >= 2
+        th2 = th2_hits and th2_bodies
         
         if not (th1 or th2): return False
 
-        # --- ĐIỀU KIỆN MÀU NẾN (CHỈ CHECK NẾU KHÔNG PHẢI TH2) ---
-        if not th2:
-            # Nếu chỉ là TH1 đơn thuần (không phải TH2), thì mới check điều kiện nến đỏ/xanh
-            if n1['close'] < n1['open']:
-                green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
-                if green_count < 2: return False
+        # Điều kiện nến hồi
+        if n1['close'] < n1['open']:
+            green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
+            if green_count < 2: return False
             
         current_price = n1['close']
         c_val = (n1['ema21'] - n1['ema34']) / n1['ema34']
@@ -183,9 +182,17 @@ def main_loop():
                     
                     if cached_top_70:
                         for tf in tfs_to_check:
-                            print(f"--- Đang check khung {tf} cho {len(cached_top_70)} con ---", flush=True)
-                            for i, s in enumerate(cached_top_70):
-                                print(f"[{i+1}/{len(cached_top_70)}] Soi {tf}: {s:<12}", end='\r', flush=True)
+                            # Tùy chỉnh danh sách quét dựa trên khung thời gian
+                            if tf in ['10m', '15m']:
+                                current_scan_list = cached_top_70[:50] # Lấy Top 50
+                                list_name = "Top 50"
+                            else:
+                                current_scan_list = cached_top_70 # Lấy Top 70 như cũ
+                                list_name = "Top 70"
+
+                            print(f"--- Đang check khung {tf} cho {len(current_scan_list)} con ({list_name}) ---", flush=True)
+                            for i, s in enumerate(current_scan_list):
+                                print(f"[{i+1}/{len(current_scan_list)}] Soi {tf}: {s:<12}", end='\r', flush=True)
                                 alert_msg = check_logic(s, tf)
                                 if alert_msg:
                                     print(f"\n✅ {alert_msg}", flush=True)
