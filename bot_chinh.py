@@ -3,23 +3,42 @@ import pandas as pd
 import time
 import requests
 import os
+import pickle
 from datetime import datetime
 from threading import Thread
 
 # ==========================================
 # 1. CẤU HÌNH THÔNG TIN
 # ==========================================
-TOKEN = "7790113864:AAF9In2hd9UKHRCzL772NC41TkIVTxDCcug"
+TOKEN = "7790113864:AAF9In2hd9UKHRCzL772NC41TkIVTkDCcug"
 CHAT_ID = "1562661521"
+DATA_FILE = "candle_db.pkl"
 
 exchange = ccxt.binance({
     'enableRateLimit': True,
     'options': {'defaultType': 'future'}
 })
 
-# Biến toàn cục để lưu danh sách Top 70 dùng chung trong 30 phút
+# Biến toàn cục
 cached_top_70 = []
 last_update_top_70 = -1 
+candle_db = {} # Lưu trữ nến: { symbol: { '5m': df, '1h': df } }
+
+# Load database từ file nếu có
+if os.path.exists(DATA_FILE):
+    try:
+        with open(DATA_FILE, 'rb') as f:
+            candle_db = pickle.load(f)
+        print(f"[SYSTEM] Đã nạp dữ liệu từ {DATA_FILE}", flush=True)
+    except:
+        print("[SYSTEM] Lỗi nạp database cũ, khởi tạo mới.", flush=True)
+
+def save_db():
+    try:
+        with open(DATA_FILE, 'wb') as f:
+            pickle.dump(candle_db, f)
+    except Exception as e:
+        print(f"[!] Lỗi lưu Database: {e}", flush=True)
 
 def send_tele(mes):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={mes}"
@@ -29,7 +48,7 @@ def send_tele(mes):
         print("\n[!] Lỗi gửi Telegram", flush=True)
 
 # ==========================================
-# 2. TỐI ƯU SIÊU NHANH: LỌC TOP 70 (24H % > 0)
+# 2. LỌC TOP 70
 # ==========================================
 def get_top_70_movers():
     now_str = datetime.now().strftime('%H:%M:%S')
@@ -51,44 +70,62 @@ def get_top_70_movers():
         return []
 
 # ==========================================
-# 3. LOGIC GHÉP NẾN & SO KÈO (PANDAS THUẦN)
+# 3. QUẢN LÝ DỮ LIỆU NẾN THÔNG MINH
+# ==========================================
+def get_ohlcv_smart(symbol, tf):
+    global candle_db
+    if symbol not in candle_db:
+        candle_db[symbol] = {'5m': pd.DataFrame(), '1h': pd.DataFrame()}
+    
+    target_tf = '5m' if tf in ['10m', '15m', '30m'] else '1h'
+    limit_needed = 995 if target_tf == '5m' else 305 # Dự phòng dư vài nến
+    
+    df_old = candle_db[symbol][target_tf]
+    
+    try:
+        if df_old.empty:
+            # Con mới hoàn toàn, lấy full từ đầu
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=target_tf, limit=limit_needed)
+            df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+            df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+        else:
+            # Con cũ, chỉ lấy thêm nến mới dựa trên timestamp cuối cùng
+            last_ts = int(df_old['ts'].iloc[-1].timestamp() * 1000)
+            new_ohlcv = exchange.fetch_ohlcv(symbol, timeframe=target_tf, since=last_ts + 1)
+            
+            if new_ohlcv:
+                new_df = pd.DataFrame(new_ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+                new_df['ts'] = pd.to_datetime(new_df['ts'], unit='ms')
+                df = pd.concat([df_old, new_df]).drop_duplicates('ts').tail(1000)
+            else:
+                df = df_old
+        
+        # Cập nhật lại vào DB
+        candle_db[symbol][target_tf] = df
+        
+        # Nếu là khung ghép (10-30m), thực hiện resample
+        if tf in ['10m', '15m', '30m']:
+            resample_map = {'10m': '10min', '15m': '15min', '30m': '30min'}
+            df_resampled = df.set_index('ts').resample(resample_map[tf], closed='left', label='left').agg({
+                'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'vol': 'sum'
+            }).dropna()
+            return df_resampled.iloc[:-1] # Bỏ nến đang chạy
+        else:
+            # Khung 1h lấy trực tiếp
+            return df.set_index('ts').iloc[:-1]
+            
+    except Exception as e:
+        print(f"\n[LOG] Lỗi lấy data {symbol} ({tf}): {e}", flush=True)
+        return pd.DataFrame()
+
+# ==========================================
+# 4. LOGIC SO KÈO (GIỮ NGUYÊN ĐIỀU KIỆN)
 # ==========================================
 def check_logic(symbol, tf):
-    df = None
-    # --- CƠ CHẾ THỬ LẠI KHI LẤY OHLCV (TỐI ĐA 2 LẦN THÊM) ---
-    for attempt in range(3): # 0 là lần đầu, 1-2 là retry
-        try:
-            if tf == '10m':
-                # Lấy 601 nến 5p để ghép thành 300 nến 10p hoàn chỉnh (bỏ nến đang chạy)
-                ohlcv_5m = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=601)
-                df_raw = pd.DataFrame(ohlcv_5m, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                df_raw['ts'] = pd.to_datetime(df_raw['ts'], unit='ms')
-                df_raw.set_index('ts', inplace=True)
-                
-                # Ghép nến 10m
-                df = df_raw.resample('10min', closed='left', label='left').agg({
-                    'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'vol': 'sum'
-                }).dropna()
-                # Bỏ nến đang chạy của khung 10m
-                df = df.iloc[:-1]
-            else:
-                # Lấy 301 nến để có 300 nến hoàn chỉnh sau khi bỏ nến đang chạy
-                ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=301)
-                df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                # Bỏ nến đang chạy
-                df = df.iloc[:-1]
-            
-            if not df.empty:
-                break # Lấy thành công thì thoát vòng lặp retry
-        except Exception as e:
-            if attempt < 2:
-                time.sleep(0.5) # Nghỉ ngắn trước khi thử lại
-                continue
-            else:
-                print(f"\n[LOG] Lỗi lấy OHLCV {symbol} ({tf}) sau 3 lần thử: {e}", flush=True)
-                return False
+    # Lấy data thông minh
+    df = get_ohlcv_smart(symbol, tf)
 
-    if df is None or df.empty: return False
+    if df is None or df.empty or len(df) < 55: return False
 
     try:
         # Tính toán EMA trên tập dữ liệu nến đã đóng
@@ -107,26 +144,20 @@ def check_logic(symbol, tf):
         last_15 = df.iloc[-15:] 
         if not all(last_15['low'] > last_15['ema34']): return False
 
-        # --- ĐIỀU KIỆN RÂU NẾN MỚI ---
+        # --- ĐIỀU KIỆN RÂU NẾN ---
         def is_good_body(r):
-            # high - ema 21 > ema 21 - low
             return (r['high'] - r['ema21']) > (r['ema21'] - r['low'])
 
         def touch21(r): return r['low'] <= r['ema21'] <= r['high']
 
-        # Check các trường hợp chạm EMA21
         th1 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3]])
-        
         th2_hits = all([touch21(x) for x in [n1, n2, n3, n4]])
         th2_bodies = is_good_body(n1) and sum([is_good_body(x) for x in [n2, n3, n4]]) >= 2
         th2 = th2_hits and th2_bodies
-
-        # TRƯỜNG HỢP 3: 4 nến đóng gần nhất đều chạm EMA21 và đều có good_body
         th3 = all([touch21(x) and is_good_body(x) for x in [n1, n2, n3, n4]])
         
         if not (th1 or th2 or th3): return False
 
-        # Nếu không phải th3 thì mới check điều kiện màu nến hồi
         if not th3:
             if n1['close'] < n1['open']:
                 green_count = sum([1 for x in [n2, n3, n4] if x['close'] > x['open']])
@@ -144,55 +175,45 @@ def check_logic(symbol, tf):
         return False
 
 # ==========================================
-# 4. VÒNG LẶP CHÍNH
+# 5. VÒNG LẶP CHÍNH
 # ==========================================
 def main_loop():
     global cached_top_70, last_update_top_70
     
     print("------------------------------------------", flush=True)
-    print("🔥 BOT SÓNG CHỦ ONLINE - CACHED 30P 🔥", flush=True)
+    print("🔥 BOT SÓNG CHỦ - SMART DB & FETCH 🔥", flush=True)
     print("------------------------------------------", flush=True)
     
-    last_run_key = "" # Dùng key để định danh mốc thời gian đã chạy
+    last_run_key = "" 
     
     while True:
         now = datetime.now()
         minute = now.minute
         second = now.second
         
-        # Kiểm tra nếu đúng giây thứ 5
         if second == 5:
-            # Tạo key định danh: "phút_giờ"
             current_run_key = f"{minute}_{now.hour}"
             
             if current_run_key != last_run_key:
                 tfs_to_check = []
-                
-                # Check các mốc phút
                 if minute % 10 == 0: tfs_to_check.append('10m')
                 if minute % 15 == 0: tfs_to_check.append('15m')
                 if minute % 30 == 0: tfs_to_check.append('30m')
                 if minute == 0: tfs_to_check.append('1h')
 
                 if tfs_to_check:
-                    # Logic cập nhật Top 70 mỗi 30 phút (phút 00 và 30)
                     if not cached_top_70 or minute in [0, 30]:
-                        # Chỉ lấy lại nếu chưa lấy lần nào hoặc đúng phút 0/30 và chưa lấy trong phút này
                         if last_update_top_70 != minute:
                             cached_top_70 = get_top_70_movers()
                             last_update_top_70 = minute
+                            save_db() # Lưu file định kỳ khi đổi top 70
 
                     print(f"\n[{now.strftime('%H:%M:%S')}] Khởi động quét khung: {tfs_to_check}", flush=True)
                     
                     if cached_top_70:
                         for tf in tfs_to_check:
-                            # Tùy chỉnh danh sách quét dựa trên khung thời gian
-                            if tf in ['10m', '15m']:
-                                current_scan_list = cached_top_70[:50] # Lấy Top 50
-                                list_name = "Top 50"
-                            else:
-                                current_scan_list = cached_top_70 # Lấy Top 70 như cũ
-                                list_name = "Top 70"
+                            current_scan_list = cached_top_70[:50] if tf in ['10m', '15m'] else cached_top_70
+                            list_name = "Top 50" if tf in ['10m', '15m'] else "Top 70"
 
                             print(f"--- Đang check khung {tf} cho {len(current_scan_list)} con ({list_name}) ---", flush=True)
                             for i, s in enumerate(current_scan_list):
@@ -206,7 +227,6 @@ def main_loop():
                     last_run_key = current_run_key
                     print(f"\nLượt quét giây thứ 5 của phút {minute} hoàn tất.", flush=True)
 
-        # Nghỉ 0.5s để không bỏ lỡ giây thứ 5 và không tốn CPU
         time.sleep(0.5)
 
 # --- PHẦN LỪA RENDER (FIX LỖI 501) ---
@@ -227,7 +247,5 @@ def health_check():
         pass
 
 if __name__ == "__main__":
-    # Chạy Health Check ở luồng phụ
     Thread(target=health_check, daemon=True).start()
-    # Chạy Bot ở luồng chính
     main_loop()
